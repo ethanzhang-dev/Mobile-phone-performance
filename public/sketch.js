@@ -1,128 +1,113 @@
 let socket, myRole = -1, isStarted = false;
 let oscillators = []; 
-let lfos = []; // 用于产生“扭曲”感的低频振荡器
-let isGlitching = [false, false, false, false];
-let statusText = "Syncing Orchestra...";
+let envelopes = [];
+let bgAlpha = 0;
+let statusText = "Syncing Creep...";
 
-// 旋律序列：C Major Pentatonic
-const sequence = [261, 293, 329, 392, 440, 392, 329, 293]; 
-const baseFreqs = [65, 261, 523, 392]; // Bass, Violin, Flute, Trumpet
+// Creep 经典和弦进行: G, B, C, Cm
+const chordProgression = [
+  [98, 123, 146], // G Major
+  [123, 155, 185], // B Major
+  [130, 164, 196], // C Major
+  [130, 155, 196]  // C Minor
+];
+
+const roleNames = ["BASS", "GUITAR", "ARPEGGIO", "LEAD"];
 
 function setup() {
-    createCanvas(windowWidth, windowHeight);
-    socket = io();
-    socket.on('assignRole', (role) => { 
-        myRole = role; 
-        statusText = "Ready: " + ["BASS", "VIOLIN", "FLUTE", "TRUMPET"][myRole];
-    });
-
-    socket.on('broadcastAction', (data) => {
-        if (isStarted) triggerGlitch(data.role, data.intensity);
-    });
+  createCanvas(windowWidth, windowHeight);
+  socket = io();
+  socket.on('assignRole', (r) => { 
+    myRole = r; 
+    statusText = "Ready: " + roleNames[myRole];
+  });
+  socket.on('broadcastAction', (data) => {
+    if (isStarted) triggerDeconstruction(data.role, data.intensity);
+  });
 }
 
 function draw() {
-    if (!isStarted) {
-        background(0);
-        drawStartUI();
-        return;
-    }
+  background(0);
+  if (!isStarted) {
+    drawStartUI();
+    return;
+  }
 
-    // 视觉反馈：如果没有破坏，就是黑色；如果有破坏，根据角色闪烁故障条纹
-    background(0);
+  // 计算当前和弦 (每2秒换一个和弦)
+  let timeInBar = (millis() / 2000) % 4;
+  let chordIdx = floor(timeInBar);
+  let currentChord = chordProgression[chordIdx];
+
+  // 视觉故障效果
+  if (bgAlpha > 0) {
     drawGlitchVisuals();
+    bgAlpha -= 0.05;
+  }
 
-    // 核心音序器逻辑：根据时间循环播放旋律
-    let step = floor(frameCount / 15) % sequence.length;
-    let currentNote = sequence[step];
-
-    for (let i = 0; i < 4; i++) {
-        if (oscillators[i]) {
-            let f = currentNote * (baseFreqs[i] / 261);
-            
-            // 如果该声部正在被破坏
-            if (isGlitching[i]) {
-                applyGlitchEffect(i, f);
-            } else {
-                oscillators[i].freq(f, 0.1);
-                oscillators[i].amp(0.15, 0.1); // 纯净音量
-            }
-        }
+  // 音频实时处理
+  for (let i = 0; i < 4; i++) {
+    if (oscillators[i]) {
+      let baseFreq = currentChord[i % 3] * (i === 0 ? 0.5 : (i === 3 ? 2 : 1));
+      
+      // 核心改变：如果有人在摇晃，音量加倍并改变频率；否则只是轻微垫音
+      if (bgAlpha > 0.1) {
+        let glitchFreq = baseFreq * (1 + random(-0.5, 0.5));
+        oscillators[i].freq(glitchFreq, 0.05);
+        oscillators[i].amp(0.6, 0.1); // 破坏音量
+      } else {
+        oscillators[i].freq(baseFreq, 0.2);
+        oscillators[i].amp(0.1, 0.5); // 基础垫音
+      }
     }
+  }
 }
 
-function applyGlitchEffect(role, originalFreq) {
-    let osc = oscillators[role];
-    switch(role) {
-        case 0: // Bass - Distortion/Growl
-            osc.freq(originalFreq + random(-20, 20));
-            osc.amp(random(0.3, 0.6)); // 变得巨大且不稳定
-            break;
-        case 1: // Violin - Stutter/Repetition
-            let s = frameCount % 4 === 0 ? 0.4 : 0;
-            osc.amp(s); 
-            break;
-        case 2: // Flute - Bitcrush/Digital Noise
-            osc.freq(originalFreq * random(1, 5));
-            osc.amp(0.2);
-            break;
-        case 3: // Trumpet - Pitch Freakout
-            osc.freq(originalFreq + sin(frameCount) * 500);
-            osc.amp(0.3);
-            break;
-    }
-}
-
-function triggerGlitch(role, intensity) {
-    isGlitching[role] = true;
-    // 1秒后自动恢复秩序（除非有人一直在摇）
-    setTimeout(() => { isGlitching[role] = false; }, 800);
-}
-
-function drawGlitchVisuals() {
-    for (let i = 0; i < 4; i++) {
-        if (isGlitching[i]) {
-            stroke(255, 150);
-            strokeWeight(random(1, 20));
-            line(0, random(height), width, random(height)); // 电视故障横纹
-            if (i === myRole) {
-                fill(255, 50);
-                rect(0, 0, width, height); // 自己破坏时屏幕剧烈闪烁
-            }
-        }
-    }
+function triggerDeconstruction(role, intensity) {
+  bgAlpha = 1.0; // 触发全场视觉闪烁
+  // 这里可以针对 role 增加更复杂的音效映射
 }
 
 async function initAudio() {
-    userStartAudio();
-    for (let i = 0; i < 4; i++) {
-        let wave = i === 2 ? 'triangle' : (i === 3 ? 'square' : 'sawtooth');
-        let osc = new p5.Oscillator(wave);
-        osc.start();
-        osc.amp(0);
-        oscillators.push(osc);
-    }
-    isStarted = true;
+  userStartAudio();
+  for (let i = 0; i < 4; i++) {
+    // 为不同角色设置不同波形以区分“乐器”
+    let type = ['sawtooth', 'square', 'triangle', 'sawtooth'][i];
+    let osc = new p5.Oscillator(type);
+    osc.start();
+    osc.amp(0);
+    oscillators.push(osc);
+  }
+  isStarted = true;
 }
 
-// UI & Interaction
 function drawStartUI() {
-    fill(255); ellipse(width/2, height/2, 140);
-    fill(0); textAlign(CENTER, CENTER); textStyle(BOLD); text("START", width/2, height/2);
-    fill(255); textStyle(NORMAL); text(statusText, width/2, height - 60);
+  fill(255); ellipse(width/2, height/2, 140);
+  fill(0); textAlign(CENTER, CENTER); textSize(20); text("CONDUCT", width/2, height/2);
+  fill(255); text(statusText, width/2, height - 60);
+}
+
+function drawGlitchVisuals() {
+  stroke(255, 200);
+  for (let i = 0; i < 10; i++) {
+    strokeWeight(random(1, 10));
+    let y = random(height);
+    line(0, y, width, y);
+  }
 }
 
 async function mousePressed() {
-    if (!isStarted && dist(mouseX, mouseY, width/2, height/2) < 70) {
-        if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
-            await DeviceOrientationEvent.requestPermission();
-        }
-        await initAudio();
+  if (!isStarted && dist(mouseX, mouseY, width/2, height/2) < 70) {
+    if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
+      await DeviceOrientationEvent.requestPermission();
     }
+    await initAudio();
+  }
 }
 
 function deviceShaken() {
-    if (isStarted) {
-        socket.emit('shakeTrigger', { role: myRole, intensity: Math.abs(accelerationX) });
-    }
+  if (isStarted) {
+    socket.emit('shakeTrigger', { role: myRole, intensity: accelerationX });
+  }
 }
+
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
