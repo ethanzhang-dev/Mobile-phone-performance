@@ -9,18 +9,20 @@ app.use(express.static(path.join(__dirname, 'public')));
 let playerCount = 0;
 
 io.on('connection', (socket) => {
-    // 分配角色 (0=低音, 1=中音, 2=高音, 3=清脆高音)
+    // 分配角色：0=深沉低音, 1=温暖中音, 2=明亮高音, 3=清脆超高音
     let myRole = playerCount % 4;
     playerCount++;
     
-    console.log(`✅ 玩家加入！分配音区: ${myRole}`);
+    console.log(`✅ 玩家加入！分配角色编号: ${myRole}`);
     socket.emit('assignRole', myRole);
 
     socket.on('disconnect', () => {
+        console.log('❌ 玩家离开');
         if(playerCount > 0) playerCount--;
     });
 });
 
-http.listen(3000, () => {
-    console.log('🚀 音乐服务器已在 3000 端口启动...');
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => {
+    console.log(`🚀 音乐服务器运行在: http://localhost:${PORT}`);
 });

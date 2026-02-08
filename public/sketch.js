@@ -1,53 +1,105 @@
-let socket, osc, env, myRole = 0, isStarted = false;
-const notes = [261.63, 293.66, 329.63, 392.00, 440.00]; // C, D, E, G, A
-const octaves = [0.5, 1, 2, 4]; // 每个人负责不同的八度
+let socket, osc, env, reverb;
+let myRole = 0;
+let isStarted = false;
+let lastShakeTime = 0;
+
+// 五声音阶（C, D, E, G, A）- 这种音阶怎么弹都好听
+const baseNotes = [261.63, 293.66, 329.63, 392.00, 440.00];
+const octaves = [0.5, 1, 2, 4]; // 角色分配：从低音到清脆高音
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
     socket = io();
     socket.on('assignRole', (role) => { myRole = role; });
 
+    // 初始化声音
     env = new p5.Envelope();
-    env.setADSR(0.01, 0.1, 0.2, 0.5); // 像风铃一样的敲击感
+    env.setADSR(0.01, 0.1, 0.2, 0.8); // 快速开启，缓慢消失
+    
     osc = new p5.Oscillator('sine');
     osc.amp(env);
-    osc.start();
+    
+    reverb = new p5.Reverb();
+    reverb.process(osc, 3, 2); // 增加3秒混响，让声音更空灵
 }
 
 function draw() {
     background(0); // 纯黑背景
+
     if (!isStarted) {
-        fill(255);
-        circle(width/2, height/2, 120); // 圆形按钮
-        fill(0);
-        textAlign(CENTER, CENTER);
-        text("START", width/2, height/2);
+        drawStartButton();
     } else {
-        // 视觉反馈：根据倾斜角度画一个圆
-        noFill();
-        stroke(255, 150);
-        let d = map(rotationX, -90, 90, 50, 200);
-        circle(width/2, height/2, d);
+        // 演奏界面
+        drawPerformanceUI();
         
-        // 实时更新音高：倾斜手机改变音符
+        // 核心逻辑：倾斜手机改变当前预设音高
         let index = floor(map(constrain(rotationX, -45, 45), -45, 45, 0, 5));
-        osc.freq(notes[index] * octaves[myRole], 0.1);
+        let targetFreq = baseNotes[index] * octaves[myRole];
+        osc.freq(targetFreq, 0.1);
     }
 }
 
-function mousePressed() {
+function drawStartButton() {
+    fill(255);
+    noStroke();
+    ellipse(width/2, height/2, 120);
+    fill(0);
+    textAlign(CENTER, CENTER);
+    textSize(20);
+    text("START", width/2, height/2);
+}
+
+function drawPerformanceUI() {
+    // 视觉反馈：根据倾斜角度画一个会跳动的圆圈
+    noFill();
+    stroke(255, 100);
+    strokeWeight(2);
+    let size = map(rotationX, -90, 90, 100, width * 0.8);
+    ellipse(width/2, height/2, size);
+    
+    fill(255, 150);
+    noStroke();
+    textSize(14);
+    text("角色: " + (myRole + 1) + " | 摇晃手机发声", width/2, height - 50);
+}
+
+// 核心点击函数：适配 iPhone 和安卓
+async function mousePressed() {
     if (!isStarted && dist(mouseX, mouseY, width/2, height/2) < 60) {
-        isStarted = true;
+        // 1. 激活音频
         userStartAudio();
-        if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
-            DeviceOrientationEvent.requestPermission();
+        
+        // 2. 申请传感器权限 (iOS)
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+                const response = await DeviceOrientationEvent.requestPermission();
+                if (response === 'granted') {
+                    startApp();
+                } else {
+                    alert("需要传感器权限才能参与合奏");
+                }
+            } catch (e) { console.error(e); }
+        } else {
+            // 安卓或普通浏览器
+            startApp();
         }
     }
 }
 
-// 核心功能：用力摇晃手机产生声音
+function startApp() {
+    isStarted = true;
+    osc.start();
+    env.play(); // 开始时响一声提示
+}
+
+// 摇晃手机触发
 function deviceShaken() {
-    if (isStarted) {
-        env.play(); 
+    if (isStarted && millis() - lastShakeTime > 200) {
+        env.play();
+        lastShakeTime = millis();
     }
+}
+
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
 }
