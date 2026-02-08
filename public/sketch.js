@@ -1,73 +1,53 @@
-let socket;
-let allUsers = {};
-let myId;
-let osc;
-let isStarted = false;
-
-// 性能优化：限制发送频率 [cite: 371, 372]
-let lastSent = 0;
-const SEND_RATE = 30; // 每 30 毫秒发一次
+let socket, osc, env, myRole = 0, isStarted = false;
+const notes = [261.63, 293.66, 329.63, 392.00, 440.00]; // C, D, E, G, A
+const octaves = [0.5, 1, 2, 4]; // 每个人负责不同的八度
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
-    socket = io(); // [cite: 34]
+    socket = io();
+    socket.on('assignRole', (role) => { myRole = role; });
 
-    // 获取自己的 ID [cite: 90, 100]
-    socket.on("connect", () => {
-        myId = socket.id;
-    });
-
-    // 接收全员状态更新 [cite: 178, 180]
-    socket.on("updateAll", (data) => {
-        allUsers = data;
-    });
-
-    // 创建交互按钮 [cite: 266]
-    let btn = createButton('点击加入编舞');
-    btn.position(width/2 - 60, height/2);
-    btn.mousePressed(() => {
-        isStarted = true;
-        btn.hide();
-        osc = new p5.Oscillator('sine');
-        osc.start();
-        osc.amp(0);
-        // 解锁传感器权限 [cite: 391]
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            DeviceOrientationEvent.requestPermission();
-        }
-    });
+    env = new p5.Envelope();
+    env.setADSR(0.01, 0.1, 0.2, 0.5); // 像风铃一样的敲击感
+    osc = new p5.Oscillator('sine');
+    osc.amp(env);
+    osc.start();
 }
 
 function draw() {
-    background(25, 25, 40);
-    if (!isStarted) return;
-
-    // 1. 获取手机角度 [cite: 281]
-    let myAngle = rotationBeta || 0; 
-
-    // 2. 节流发送数据 [cite: 374, 375]
-    let now = millis();
-    if (now - lastSent > SEND_RATE) {
-        socket.emit("gyroData", { angle: myAngle });
-        lastSent = now;
-    }
-
-    // 3. 绘制所有玩家 [cite: 191]
-    for (let id in allUsers) {
-        let userAngle = allUsers[id].angle;
-        let x = map(userAngle, -90, 90, 0, width);
+    background(0); // 纯黑背景
+    if (!isStarted) {
+        fill(255);
+        circle(width/2, height/2, 120); // 圆形按钮
+        fill(0);
+        textAlign(CENTER, CENTER);
+        text("START", width/2, height/2);
+    } else {
+        // 视觉反馈：根据倾斜角度画一个圆
+        noFill();
+        stroke(255, 150);
+        let d = map(rotationX, -90, 90, 50, 200);
+        circle(width/2, height/2, d);
         
-        if (id === myId) {
-            fill(0, 255, 150);
-            stroke(255);
-            // 声音随角度变化
-            let freq = map(userAngle, -90, 90, 200, 600);
-            osc.freq(freq, 0.1);
-            osc.amp(0.3, 0.1);
-        } else {
-            fill(255, 100);
-            noStroke();
+        // 实时更新音高：倾斜手机改变音符
+        let index = floor(map(constrain(rotationX, -45, 45), -45, 45, 0, 5));
+        osc.freq(notes[index] * octaves[myRole], 0.1);
+    }
+}
+
+function mousePressed() {
+    if (!isStarted && dist(mouseX, mouseY, width/2, height/2) < 60) {
+        isStarted = true;
+        userStartAudio();
+        if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
+            DeviceOrientationEvent.requestPermission();
         }
-        ellipse(x, height/2, 50, 50);
+    }
+}
+
+// 核心功能：用力摇晃手机产生声音
+function deviceShaken() {
+    if (isStarted) {
+        env.play(); 
     }
 }
